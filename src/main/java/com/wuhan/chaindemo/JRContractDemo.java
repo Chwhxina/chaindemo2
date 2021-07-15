@@ -1,0 +1,469 @@
+package com.wuhan.chaindemo;
+
+import com.alipay.mychain.sdk.api.MychainClient;
+import com.alipay.mychain.sdk.api.callback.IEventCallback;
+import com.alipay.mychain.sdk.api.env.ClientEnv;
+import com.alipay.mychain.sdk.api.env.ISslOption;
+import com.alipay.mychain.sdk.api.env.SignerOption;
+import com.alipay.mychain.sdk.api.env.SslBytesOption;
+import com.alipay.mychain.sdk.api.logging.AbstractLoggerFactory;
+import com.alipay.mychain.sdk.api.logging.ILogger;
+import com.alipay.mychain.sdk.api.utils.ConfidentialUtil;
+import com.alipay.mychain.sdk.api.utils.Utils;
+import com.alipay.mychain.sdk.common.VMTypeEnum;
+import com.alipay.mychain.sdk.crypto.MyCrypto;
+import com.alipay.mychain.sdk.crypto.keyoperator.Pkcs8KeyOperator;
+import com.alipay.mychain.sdk.crypto.keypair.Keypair;
+import com.alipay.mychain.sdk.crypto.signer.SignerBase;
+import com.alipay.mychain.sdk.domain.account.Identity;
+import com.alipay.mychain.sdk.domain.event.EventModelType;
+import com.alipay.mychain.sdk.errorcode.ErrorCode;
+import com.alipay.mychain.sdk.message.Message;
+import com.alipay.mychain.sdk.message.event.PushContractEvent;
+import com.alipay.mychain.sdk.message.transaction.AbstractTransactionRequest;
+import com.alipay.mychain.sdk.message.transaction.TransactionReceiptResponse;
+import com.alipay.mychain.sdk.message.transaction.confidential.ConfidentialRequest;
+import com.alipay.mychain.sdk.message.transaction.contract.*;
+import com.alipay.mychain.sdk.type.BaseFixedSizeUnsignedInteger;
+import com.alipay.mychain.sdk.utils.ByteUtils;
+import com.alipay.mychain.sdk.utils.IOUtil;
+import com.alipay.mychain.sdk.utils.RandomUtil;
+import com.alipay.mychain.sdk.vm.EVMOutput;
+import com.alipay.mychain.sdk.vm.EVMParameter;
+
+import java.io.IOException;
+import java.math.BigInteger;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * @author Chris
+ * @date 2021/5/29 18:22
+ * @Email:gang.wu@nexgaming.com
+ */
+public class JRContractDemo {
+    private static String contractCodeString = "6080604052633b9aca00600055600060015534801561001d57600080fd5b50336002819055506104f6806100346000396000f300608060405260043610610062576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806357fce39d14610067578063af7c102c14610092578063b2628df8146100d3578063d448601914610122575b600080fd5b34801561007357600080fd5b5061007c610171565b6040518082815260200191505060405180910390f35b34801561009e57600080fd5b506100bd6004803603810190808035906020019092919050505061017b565b6040518082815260200191505060405180910390f35b3480156100df57600080fd5b506101086004803603810190808035906020019092919080359060200190929190505050610198565b604051808215151515815260200191505060405180910390f35b34801561012e57600080fd5b50610157600480360381019080803590602001909291908035906020019092919050505061036b565b604051808215151515815260200191505060405180910390f35b6000600254905090565b600060036000838152602001908152602001600020549050919050565b600060025433141515610213576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260118152602001807f5065726d697373696f6e2064656e69656400000000000000000000000000000081525060200191505060405180910390fd5b60005482600154011315801561022e57506001548260015401135b801561023a5750600082135b15156102ae576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040180806020018281038252600e8152602001807f496e76616c69642076616c75652100000000000000000000000000000000000081525060200191505060405180910390fd5b816003600085815260200190815260200160002060008282540192505081905550816001600082825401925050819055507fd26beacd9719a427d3772b28e4783266874e2a65b076feabcb4258f0f479ea7f83836001546040518084815260200183815260200180602001838152602001828103825260068152602001807f6a7274657374000000000000000000000000000000000000000000000000000081525060200194505050505060405180910390a16001905092915050565b6000816003600033815260200190815260200160002054121515156103f8576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260138152602001807f62616c616e6365206e6f7420656e6f756768210000000000000000000000000081525060200191505060405180910390fd5b60008213801561040a57506000548213155b151561047e576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040180806020018281038252600e8152602001807f496e76616c69642076616c75652100000000000000000000000000000000000081525060200191505060405180910390fd5b81600360003381526020019081526020016000206000828254039250508190555081600360008581526020019081526020016000206000828254019250508190555060019050929150505600a165627a7a723058201b8d5df8a8e9676e263543ba19cbb400936ada8b433e04541a18a361f149c0760029";
+    private static byte[] contractCode = ByteUtils.hexStringToBytes(contractCodeString); //CreditManager
+
+    //upgrade
+    private static String contractUpdateCodeString = "60806040526004361061006d576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff1680631b3c4fab1461007257806357fce39d14610187578063af7c102c146101b2578063b2628df8146101f3578063d448601914610242575b600080fd5b34801561007e57600080fd5b50610087610291565b60405180868152602001806020018060200185151515158152602001848152602001838103835287818151815260200191508051906020019080838360005b838110156100e15780820151818401526020810190506100c6565b50505050905090810190601f16801561010e5780820380516001836020036101000a031916815260200191505b50838103825286818151815260200191508051906020019080838360005b8381101561014757808201518184015260208101905061012c565b50505050905090810190601f1680156101745780820380516001836020036101000a031916815260200191505b5097505050505050505060405180910390f35b34801561019357600080fd5b5061019c610337565b6040518082815260200191505060405180910390f35b3480156101be57600080fd5b506101dd60048036038101908080359060200190929190505050610341565b6040518082815260200191505060405180910390f35b3480156101ff57600080fd5b50610228600480360381019080803590602001909291908035906020019092919050505061035e565b604051808215151515815260200191505060405180910390f35b34801561024e57600080fd5b506102776004803603810190808035906020019092919080359060200190929190505050610523565b604051808215151515815260200191505060405180910390f35b6000606080600080606080600080600033905060c89250600091506040805190810160405280600781526020017f6a72626c6f636b0000000000000000000000000000000000000000000000000081525094506040805190810160405280601a81526020017f32303231303533316a72626c6f636b636f6e7261637463616c6c000000000000815250935082858584849950995099509950995050505050509091929394565b6000600254905090565b600060036000838152602001908152602001600020549050919050565b6000600254331415156103d9576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260118152602001807f5065726d697373696f6e2064656e69656400000000000000000000000000000081525060200191505060405180910390fd5b6000548260015401131580156103f457506001548260015401135b80156104005750600082135b1515610474576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040180806020018281038252600e8152602001807f496e76616c69642076616c75652100000000000000000000000000000000000081525060200191505060405180910390fd5b8160036000858152602001908152602001600020600082825401925050819055508160016000828254019250508190555081837f9a46fdc9277c739031110f773b36080a9a2012d0b3eca1f5ed8a3403973e05576001546040518080602001838152602001828103825260048152602001807f64656d6f000000000000000000000000000000000000000000000000000000008152506020019250505060405180910390a36001905092915050565b6000816003600033815260200190815260200160002054121515156105b0576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260138152602001807f62616c616e6365206e6f7420656e6f756768210000000000000000000000000081525060200191505060405180910390fd5b6000821380156105c257506000548213155b1515610636576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040180806020018281038252600e8152602001807f496e76616c69642076616c75652100000000000000000000000000000000000081525060200191505060405180910390fd5b81600360003381526020019081526020016000206000828254039250508190555081600360008581526020019081526020016000206000828254019250508190555060019050929150505600a165627a7a72305820929f39f5dfc978f05e029b986659fd7542e1009cbbb133b2bc009f8876b59c910029";
+    private static byte[] contractUpdateCode = ByteUtils.hexStringToBytes(contractUpdateCodeString); //CreditManager
+
+
+
+    /**
+     * contract id
+     */
+    private static String callContractId = "wuda1626265743497";
+
+    private static final String account = "chrisblocktest";
+    private static Identity userIdentity;
+    private static Keypair userKeypair;
+
+    /**
+     * sdk client
+     */
+    private static MychainClient sdk;
+
+    /**
+     * client key password
+     */
+    private static String keyPassword = "Local#123";
+    /**
+     * user password
+     */
+    private static String userPassword = "Local#123";
+    /**
+     * host ip
+     */
+
+    private static String host = "47.103.163.48";
+
+    /**
+     * server port
+     */
+    private static int port = 18130;
+    /**
+     * trustCa password.
+     */
+    private static String trustStorePassword = "mychain";
+    /**
+     * mychain environment
+     */
+    private static ClientEnv env;
+    /**
+     * mychain is tee Chain
+     */
+    private static boolean isTeeChain = false;
+    /**
+     * tee chain publicKeys
+     */
+    private static List<byte[]> publicKeys = new ArrayList<byte[]>();
+    /**
+     * tee chain secretKey
+     */
+    private static String secretKey = "123456";
+
+
+    private static void initMychainEnv() throws IOException {
+        // any user key for sign message
+        String userPrivateKeyFile = "user.key";
+        userIdentity = Utils.getIdentityByName(account);
+        Pkcs8KeyOperator pkcs8KeyOperator = new Pkcs8KeyOperator();
+        userKeypair = pkcs8KeyOperator.load(IOUtil.inputStreamToByte(JRContractDemo.class.getClassLoader().getResourceAsStream(userPrivateKeyFile)), userPassword);
+
+        // use publicKeys by tee
+        if (isTeeChain) {
+            Keypair keypair = new Pkcs8KeyOperator()
+                    .loadPubkey(
+                            IOUtil.inputStreamToByte(JRContractDemo.class.getClassLoader().getResourceAsStream("test_seal_pubkey.pem")));
+            byte[] publicKeyDer = keypair.getPubkeyEncoded();
+            publicKeys.add(publicKeyDer);
+        }
+
+        env = buildMychainEnv();
+        ILogger logger = AbstractLoggerFactory.getInstance(JRContractDemo.class);
+        env.setLogger(logger);
+    }
+
+    private static ClientEnv buildMychainEnv() throws IOException {
+        InetSocketAddress inetSocketAddress = InetSocketAddress.createUnresolved(host, port);
+        String keyFilePath = "client.key";
+        String certFilePath = "client.crt";
+        String trustStoreFilePath = "trustCa";
+        // build ssl option
+        ISslOption sslOption = new SslBytesOption.Builder()
+                .keyBytes(IOUtil.inputStreamToByte(JRContractDemo.class.getClassLoader().getResourceAsStream(keyFilePath)))
+                .certBytes(IOUtil.inputStreamToByte(JRContractDemo.class.getClassLoader().getResourceAsStream(certFilePath)))
+                .keyPassword(keyPassword)
+                .trustStorePassword(trustStorePassword)
+                .trustStoreBytes(
+                        IOUtil.inputStreamToByte(JRContractDemo.class.getClassLoader().getResourceAsStream(trustStoreFilePath)))
+                .build();
+
+        List<InetSocketAddress> socketAddressArrayList = new ArrayList<InetSocketAddress>();
+        socketAddressArrayList.add(inetSocketAddress);
+
+        List<SignerBase> signerBaseList = new ArrayList<SignerBase>();
+        SignerBase signerBase = MyCrypto.getInstance().createSigner(userKeypair);
+        signerBaseList.add(signerBase);
+        SignerOption signerOption = new SignerOption();
+        signerOption.setSigners(signerBaseList);
+        return ClientEnv.build(socketAddressArrayList, sslOption, signerOption);
+    }
+
+    private static void initSdk() {
+        sdk = new MychainClient();
+        boolean initResult = sdk.init(env);
+        if (!initResult) {
+            exit("initSdk", "sdk init failed.");
+        }else{
+            System.out.println("sdk init success");
+        }
+    }
+
+    private static String getErrorMsg(int errorCode) {
+        int minMychainSdkErrorCode = ErrorCode.SDK_INTERNAL_ERROR.getErrorCode();
+        if (errorCode < minMychainSdkErrorCode) {
+            return ErrorCode.valueOf(errorCode).getErrorDesc();
+        } else {
+            return ErrorCode.valueOf(errorCode).getErrorDesc();
+        }
+    }
+
+    private static void exit(String tag, String msg) {
+        exit(String.format("%s error : %s ", tag, msg));
+    }
+
+    private static void exit(String msg) {
+        System.out.println(msg);
+        System.exit(0);
+    }
+
+    private static void signRequest(AbstractTransactionRequest request) {
+        // sign request
+        long ts = sdk.getNetwork().getSystemTimestamp();
+        request.setTxTimeNonce(ts, BaseFixedSizeUnsignedInteger.Fixed64BitUnsignedInteger
+                .valueOf(RandomUtil.randomize(ts + request.getTransaction().hashCode())), true);
+        request.complete();
+        sdk.getConfidentialService().signRequest(env.getSignerOption().getSigners(), request);
+    }
+
+    private static void deployContract() {
+        EVMParameter contractParameters = new EVMParameter();
+        String contractId = "wuda" + System.currentTimeMillis();
+
+        // build DeployContractRequest
+        DeployContractRequest request = new DeployContractRequest(userIdentity,
+                Utils.getIdentityByName(contractId), contractCode, VMTypeEnum.EVM,
+                contractParameters, BigInteger.ZERO);
+
+        TransactionReceiptResponse deployContractResult;
+        if (isTeeChain) {
+            signRequest(request);
+            // generate transaction key
+            byte[] transactionKey = ConfidentialUtil.keyGenerate(secretKey,
+                    request.getTransaction().getHash().getValue());
+
+            ConfidentialRequest confidentialRequest = new ConfidentialRequest(request, publicKeys, transactionKey);
+            deployContractResult = sdk.getConfidentialService().confidentialRequest(confidentialRequest);
+        } else {
+            deployContractResult = sdk.getContractService().deployContract(request);
+        }
+
+        // deploy contract
+        if (!deployContractResult.isSuccess()
+                || deployContractResult.getTransactionReceipt().getResult() != 0) {
+            exit("deployContract",
+                    getErrorMsg((int) deployContractResult.getTransactionReceipt().getResult()));
+        } else {
+            System.out.println("deploy contract success.contact id is " + contractId);
+        }
+    }
+
+    private static void callContractIssueCredit(String accountName,Integer amount) {
+        EVMParameter parameters = new EVMParameter("Issue(identity,int256)");
+        parameters.addIdentity(Utils.getIdentityByName(accountName));
+        parameters.addUint(BigInteger.valueOf(amount));
+
+        // build CallContractRequest
+        CallContractRequest request = new CallContractRequest(userIdentity,
+                Utils.getIdentityByName(callContractId), parameters, BigInteger.ZERO, VMTypeEnum.EVM);
+
+        TransactionReceiptResponse callContractResult;
+        if (isTeeChain) {
+            signRequest(request);
+            // generate transaction key
+            byte[] transactionKey = ConfidentialUtil.keyGenerate(secretKey,
+                    request.getTransaction().getHash().getValue());
+
+            ConfidentialRequest confidentialRequest = new ConfidentialRequest(request, publicKeys, transactionKey);
+
+            callContractResult = sdk.getConfidentialService().confidentialRequest(confidentialRequest);
+        } else {
+            callContractResult = sdk.getContractService().callContract(request);
+        }
+
+        if (!callContractResult.isSuccess() || callContractResult.getTransactionReceipt().getResult() != 0) {
+            System.out.println("callContract Error :"  + getErrorMsg((int) callContractResult.getTransactionReceipt().getResult()));
+        } else {
+            byte[] output = callContractResult.getTransactionReceipt().getOutput();
+            if (output == null) {
+                exit("call issue function", "output failed");
+            } else {
+                // decode return values
+                EVMOutput contractReturnValues = new EVMOutput(ByteUtils.toHexString(output));
+                System.out.println("call callContractIssueCredit success, response value: " + contractReturnValues.getBoolean());
+            }
+        }
+    }
+
+    private static void callContractTransferCredit(String toAccountName,Integer transferAmount) {
+        EVMParameter parameters = new EVMParameter("Transfer(identity,int256)");
+        parameters.addIdentity(Utils.getIdentityByName(toAccountName));
+        parameters.addUint(BigInteger.valueOf(transferAmount));
+
+        // build CallContractRequest
+        CallContractRequest request = new CallContractRequest(userIdentity,
+                Utils.getIdentityByName(callContractId), parameters, BigInteger.ZERO, VMTypeEnum.EVM);
+
+        TransactionReceiptResponse callContractResult;
+        if (isTeeChain) {
+            signRequest(request);
+            // generate transaction key
+            byte[] transactionKey = ConfidentialUtil.keyGenerate(secretKey,
+                    request.getTransaction().getHash().getValue());
+
+            ConfidentialRequest confidentialRequest = new ConfidentialRequest(request, publicKeys, transactionKey);
+
+            callContractResult = sdk.getConfidentialService().confidentialRequest(confidentialRequest);
+        } else {
+            callContractResult = sdk.getContractService().callContract(request);
+        }
+
+        if (!callContractResult.isSuccess() || callContractResult.getTransactionReceipt().getResult() != 0) {
+            System.out.println("callContract Error :"  + getErrorMsg((int) callContractResult.getTransactionReceipt().getResult()));
+        } else {
+            byte[] output = callContractResult.getTransactionReceipt().getOutput();
+            if (output == null) {
+                exit("call callContractTransferCredit function", "output failed");
+            } else {
+                // decode return values
+                EVMOutput contractReturnValues = new EVMOutput(ByteUtils.toHexString(output));
+                System.out.println("call callContractTransferCredit success, response value: " + contractReturnValues.getBoolean());
+            }
+        }
+    }
+
+    private static void callContractQueryCredit(String accountName) {
+        EVMParameter parameters = new EVMParameter("Query(identity)");
+        parameters.addIdentity(Utils.getIdentityByName(accountName));
+
+        // build CallContractRequest
+        CallContractRequest request = new CallContractRequest(userIdentity,
+                Utils.getIdentityByName(callContractId), parameters, BigInteger.ZERO, VMTypeEnum.EVM);
+
+        TransactionReceiptResponse callContractResult;
+        if (isTeeChain) {
+            signRequest(request);
+            // generate transaction key
+            byte[] transactionKey = ConfidentialUtil.keyGenerate(secretKey,
+                    request.getTransaction().getHash().getValue());
+
+            ConfidentialRequest confidentialRequest = new ConfidentialRequest(request, publicKeys, transactionKey);
+
+            callContractResult = sdk.getConfidentialService().confidentialRequest(confidentialRequest);
+        } else {
+            callContractResult = sdk.getContractService().callContract(request);
+        }
+
+        if (!callContractResult.isSuccess() || callContractResult.getTransactionReceipt().getResult() != 0) {
+            System.out.println("callContract Error :"  + getErrorMsg((int) callContractResult.getTransactionReceipt().getResult()));
+        } else {
+            byte[] output = callContractResult.getTransactionReceipt().getOutput();
+            if (output == null) {
+                exit("call QueryCredit function", "output failed");
+            } else {
+                // decode return values
+                EVMOutput contractReturnValues = new EVMOutput(ByteUtils.toHexString(output));
+                System.out.println( String.format("call callContractQueryCredit function,user %s current credit is %d",accountName,contractReturnValues.getInt()));
+            }
+        }
+    }
+
+
+    //升级合约
+    private static void updateContractDemo() {
+        EVMParameter contractParameters = new EVMParameter();
+        UpdateContractRequest request = new UpdateContractRequest(Utils.getIdentityByName(callContractId), contractUpdateCode, VMTypeEnum.EVM);
+        UpdateContractResponse updateContractResponse = sdk.getContractService().updateContract(request);
+
+        // deploy contract
+        if (!updateContractResponse.isSuccess()
+                || updateContractResponse.getTransactionReceipt().getResult() != 0) {
+            exit("upgrade Contract",
+                    getErrorMsg((int) updateContractResponse.getTransactionReceipt().getResult()));
+        } else {
+            System.out.println("upgrade contract success.contact id is " + callContractId);
+        }
+    }
+
+    //调用升级新方法
+    private static void callContractGetParamsTest() {
+        EVMParameter parameters = new EVMParameter("GetParamsTest()");
+
+        // build CallContractRequest
+        CallContractRequest request = new CallContractRequest(userIdentity,
+                Utils.getIdentityByName(callContractId), parameters, BigInteger.ZERO, VMTypeEnum.EVM);
+
+        TransactionReceiptResponse callContractResult;
+        if (isTeeChain) {
+            signRequest(request);
+            // generate transaction key
+            byte[] transactionKey = ConfidentialUtil.keyGenerate(secretKey,
+                    request.getTransaction().getHash().getValue());
+
+            ConfidentialRequest confidentialRequest = new ConfidentialRequest(request, publicKeys, transactionKey);
+
+            callContractResult = sdk.getConfidentialService().confidentialRequest(confidentialRequest);
+        } else {
+            callContractResult = sdk.getContractService().callContract(request);
+        }
+
+        if (!callContractResult.isSuccess() || callContractResult.getTransactionReceipt().getResult() != 0) {
+            System.out.println("callContract Error :"  + getErrorMsg((int) callContractResult.getTransactionReceipt().getResult()));
+        } else {
+            byte[] output = callContractResult.getTransactionReceipt().getOutput();
+            if (output == null) {
+                exit("call callContractGetParamsTest function", "output failed");
+            } else {
+                // decode return values
+                EVMOutput contractReturnValues = new EVMOutput(ByteUtils.toHexString(output));
+
+                BigInteger bigInteger = contractReturnValues.getUint(); // 100
+                String string1 = contractReturnValues.getString();       // "abc"
+                String string2 = contractReturnValues.getString();
+                boolean isOK = contractReturnValues.getBoolean();
+                String id = contractReturnValues.getIdentity().toString();
+                System.out.println("call callContractGetParamsTest function OK");
+            }
+        }
+    }
+
+
+    //冻结合约
+    private static void freezeContractTest() {
+        FreezeContractRequest request = new FreezeContractRequest(userIdentity, Utils.getIdentityByName(callContractId));
+        FreezeContractResponse freezeContractResponse = sdk.getContractService().freezeContract(request);
+        if (!freezeContractResponse.isSuccess()
+                || freezeContractResponse.getTransactionReceipt().getResult() != 0) {
+            exit("freeze Contract",
+                    getErrorMsg((int) freezeContractResponse.getTransactionReceipt().getResult()));
+        } else {
+            System.out.println("freeze contract success.contact id is " + callContractId);
+        }
+    }
+
+    //解冻合约
+    private static void unFreezeContractTest() {
+        UnFreezeContractRequest request = new UnFreezeContractRequest(userIdentity, Utils.getIdentityByName(callContractId));
+        UnFreezeContractResponse unFreezeContractResponse = sdk.getContractService().unFreezeContract(request);
+        if (!unFreezeContractResponse.isSuccess()
+                || unFreezeContractResponse.getTransactionReceipt().getResult() != 0) {
+            exit("freeze Contract",
+                    getErrorMsg((int) unFreezeContractResponse.getTransactionReceipt().getResult()));
+        } else {
+            System.out.println("unFreeze contract success.contact id is " + callContractId);
+        }
+    }
+
+    //订阅合约
+    private static void listenContractTest(){
+        //event handler
+        IEventCallback handler = new IEventCallback() {
+            @Override
+            public void onEvent(Message message) {
+                PushContractEvent eventContractMessage = (PushContractEvent) message;
+                // code
+            }
+        };
+
+        BigInteger eventId = sdk.getEventService().listenContract(userIdentity, handler, EventModelType.PUSH);
+        if (eventId.longValue() == 0) {
+            System.out.println("listenContract failed");
+        }
+    }
+
+    public static void main(String[] args) throws Exception {
+        //step 1:init mychain env.
+        initMychainEnv();
+        //step 2: init sdk client
+        initSdk();
+
+        //step 3 : deploy a contract using useridentity.
+        //deployContract();
+
+        //step 4 callContract.
+        String testAccount = "jraccount_1622277417038";
+        //callContractIssueCredit(testAccount,800);
+        callContractQueryCredit(testAccount);
+        //callContractTransferCredit(testAccount,100);
+
+        //upgrade contract 调用
+        //updateContractDemo();
+        //callContractGetParamsTest();
+
+
+        //freezeContract调用
+        //freezeContractTest();
+        //callContractQueryCredit(account);
+
+        //unFreeze调用
+        //unFreezeContractTest();
+
+        System.in.read();
+        //step 5 : sdk shut down
+        sdk.shutDown();
+    }
+}
